@@ -11,20 +11,28 @@ require_relative 'lib/proxy_object'
 require_relative 'lib/server_impl'
 
 Plugin.create(:remote_plugin_call) do
-  Thread.new do
-    loop do
-      begin
-        port = '0.0.0.0:50051'
-        s = GRPC::RpcServer.new
-        s.add_http2_port(port, :this_port_is_insecure)
-        s.handle(Plugin::RemotePluginCall::Server.new)
-        warn 'Plugin::RemotePluginCall::Server start'
-        s.run
-      rescue Exception => e
-        warn e
+  filter_rpc_servers do |servers|
+    servers << Plugin::RemotePluginCall::Server.new
+    [servers]
+  end
+  
+  Delayer.new do
+    Thread.new do
+      loop do
+        begin
+          port = '0.0.0.0:50051'
+          s = GRPC::RpcServer.new
+          s.add_http2_port(port, :this_port_is_insecure)
+          servers, = Plugin.filtering(:rpc_servers, [])
+          servers.each(&s.method(:handle))
+          warn 'Plugin::RemotePluginCall::Server start'
+          s.run
+        rescue Exception => e
+          warn e
+        end
+        warn 'Plugin::RemotePluginCall::Server crashed. restart in 1 second'
+        sleep 1
       end
-      warn 'Plugin::RemotePluginCall::Server crashed. restart in 1 second'
-      sleep 1
     end
   end
 end
